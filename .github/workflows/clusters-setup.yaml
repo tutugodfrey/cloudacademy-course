@@ -1,0 +1,68 @@
+name: This pipeline should build on all feature branch except staging, develop, and master
+on:
+  push:
+    branches:
+      - test-pipeline
+
+jobs:
+  build:
+    name: Run test
+    # runs-on: ubuntu-latest
+    # runs-on: ubuntu-18.04
+    runs-on: macos-10.15
+    env:
+      AWS_REGION: eu-west-1
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      CLUSTER_NAME: alerzo
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: test application
+        # This step needs to be filled with command to run test
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Install eksctl & kubectl
+        run: |
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
+          brew tap weaveworks/tap
+          brew install weaveworks/tap/eksctl
+          eksctl version
+
+          # curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+          # sudo mv /tmp/eksctl /usr/local/bin
+
+          curl -o kubectl https://amazon-eks.s3.us-west-2.amazonaws.com/1.21.2/2021-07-05/bin/darwin/amd64/kubectl
+          chmod +x ./kubectl
+          mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$PATH:$HOME/bin
+          echo 'export PATH=$PATH:$HOME/bin' >> ~/.bashrc
+          kubectl version --short --client
+
+      - name: Configure eksctl
+        # This step needs to be filled with command to run test
+        run: |
+          eksctl version
+          # go get github.com/michenriksen/Amass/...
+          # cd ~/go/src/github.com/michenriksen/Amass
+          # go build -o amass cmd/amass/*
+          ls -al
+
+          # eksctl create cluster --name ${CLUSTER_NAME} --region eu-west-1 --instance-types t3.medium --instance-name alerzo-cluster-node --managed --asg-access
+          eksctl create cluster -f ./cluster-settings/cluster-config.yaml
+
+      - name: Configure cluster autoscaler
+        run: |
+          sed -i 's/CLUSTER_NAME/${CLUSTER_NAME}/' cluster-settings/cluster-autoscaler-autodiscover.yaml
+          kubectl apply -f cluster-settings/cluster-autoscaler-autodiscover.yaml
+
+      - name: Create k8s metric server resource
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.3.6/components.yaml
+
+      - name: Set up Istio
+        run: |
+          ./install-istio.sh default # Installing Istio with default profile
